@@ -1,0 +1,132 @@
+---
+title: "PredictiveML"
+author: "Del"
+date: "15 de Dezembro de 2014"
+output: html_document
+---
+
+### Background
+
+Using devices such as **Jawbone Up**, **Nike FuelBand**, and **Fitbit** it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify **how much** of a particular activity they do, but they rarely quantify **how well** they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har>.
+
+Our outcome variable is **classe**, a 5 levels factor variable. Participants were asked to perform one set of 10 repetitions of the *unilateral dumbbell biceps curl* in the following 5 different ways:
+
+* Class A: exactly according to the specification
+* Class B: throwing the elbows to the front
+* Class C: lifting the dumbbell only halfway
+* Class D: lowering the dumbbell only halfway
+* Class E: throwing the hips to the front
+
+Class B, C, D, and E being common mistakes doing this exercise, while Class A is the only correct way to perform *unilateral dumbell biceps curl*.
+
+### Reproduceability
+
+Loading the correct packages and data.
+
+```{r, cache=TRUE}
+
+library(caret)
+library(randomForest)
+
+if (! file.exists('./pml-training.csv')) {download.file('http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', destfile = './pml-training.csv')}
+if (! file.exists('./pml-testing.csv')) {download.file('http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', destfile = './pml-testing.csv')}
+
+train.RAW <- read.csv("./pml-training.csv", na.strings = c("", "NA", "NULL"))
+test.RAW <- read.csv("./pml-testing.csv", na.strings = c("", "NA", "NULL"))
+
+```
+
+## Cleaning Data
+
+```{r, cache=TRUE}
+
+train.RAW <- train.RAW[ , colSums(is.na(train.RAW)) == 0]
+rmvNA <- apply(train.RAW, 2, function(x) {sum(is.na(x))})
+train <- train.RAW[, which(rmvNA == 0)]
+test <- test.RAW[, which(rmvNA == 0)]
+
+rm.class <- grep("timestamp|X|user_name|new_window|num_window", names(train))
+train <- train[ , -c(rm.class, length(train))]
+test <- test[ , -c(rm.class, length(test))]
+
+```
+
+Check for high correlation
+
+```{r}
+library(caret)
+corrMat <- cor(na.omit(train[sapply(train, is.numeric)]))
+corrDF <- expand.grid(row = 1:52, col = 1:52)
+corrDF$corr <- as.vector(corrMat)
+levelplot(corr ~ row + col, corrDF)
+
+```
+
+Remove high correlation
+
+```{r}
+
+highCorr <- findCorrelation(corrMat, cutoff = .8, verbose = FALSE)
+train <- cbind(classe = train.RAW$classe, train[ , -highCorr])
+test <- test[ , -highCorr]
+
+
+```
+
+
+## Spliting for Cross Validation
+
+We proceed to subset the data using the output from the crateDataPartitation function. We subset it into the *training* and *testing* datasets. In this function *p* specifies the proportion of data that will exist in each chunk after splitting the data, in this case we split into two chunks of 70% and 30%.
+
+```{r}
+
+inTrain <- createDataPartition(train$classe, p = 0.7, list = F)
+training <- train[inTrain, ]
+testing <- train[-inTrain, ]
+
+```
+
+
+## Cross Validation Testing and Out-of-Sample Error Estimate
+
+Cross-validation can be performed, since we just subsampled our training data set randomly without replacement into 2 subsamples: **training** (70% of the original train data set) and **testing** (30%). Our model will be fitted on the training data set, and tested on the testing data. Let's apply a famous algorithm for it's high accuracy, Random Forest.
+
+```{r, cache=TRUE}
+
+set.seed(1234)
+training.rf <- randomForest(classe ~ ., data = training, ntree = 500, importance = TRUE)
+training.rf
+plot(training.rf, log = "y")
+varImpPlot(training.rf, type = 1, pch = 19, col = 1, cex = 1, main = "Random Forest Variable Importance plot")
+
+```
+
+```{r, cache=TRUE}
+
+library(randomForest)
+pred.rf <- predict(training.rf, testing, type = "class")
+confusionMatrix(pred.rf, testing$classe)
+
+```
+
+Expected Out-of-sample error is 0.007, because ```Out-of-sample error = 1 - accuracy```. Following, a 20 cases dataset will be used for testing this prediction model. With an accuracy of > 99%, no misclassification is expected to occur.
+
+## Create 20 files for assignment submission
+
+```{r, cache=TRUE}
+
+answers <- predict(training.rf, test.RAW)
+
+pml_write_files = function(x){
+        n = length(x)
+        for(i in 1:n){
+                filename = paste0("problem_id_",i,".txt")
+                write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+                }
+        }
+pml_write_files(answers)
+
+answers
+
+```
+
